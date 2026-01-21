@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Harem Altın Anlık Fiyatlar</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 90%; max-width: 500px; text-align: center; }
+        h1 { color: #333; margin-bottom: 1.5rem; border-bottom: 2px solid #eee; padding-bottom: 0.5rem; }
+        .price-card { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; }
+        .label { font-weight: bold; color: #555; }
+        .value { color: #2c3e50; font-family: monospace; font-size: 1.1rem; }
+        .status { margin-top: 1.5rem; font-size: 0.8rem; color: #888; }
+        #prices-container { max-height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Harem Altın Fiyatları</h1>
+    <div id="prices-container">
+        <div class="price-card"><span class="label">Bağlanıyor...</span></div>
+    </div>
+    <div class="status" id="last-update">Bağlantı bekleniyor...</div>
+</div>
+
+<script src="haremaltin.js"></script>
+<script>
+    window.HaremAltinOnUpdate = function(data) {
+        const container = document.getElementById('prices-container');
+        const status = document.getElementById('last-update');
+        
+        // Gösterilecek ana semboller
+        const symbols = {
+            'USDTRY': 'Dolar (USD)',
+            'EURTRY': 'Euro (EUR)',
+            'ALTIN': 'Has Altın',
+            'ONS': 'Ons Altın',
+            'CEYREK_YENI': 'Çeyrek Altın'
+        };
+
+        let html = '';
+        for (let key in symbols) {
+            if (data[key]) {
+                html += `
+                    <div class="price-card">
+                        <span class="label">${symbols[key]}</span>
+                        <span class="value">${data[key].satis}</span>
+                    </div>`;
+            }
+        }
+        
+        container.innerHTML = html || '<div class="price-card">Veri işleniyor...</div>';
+        status.textContent = 'Son Güncelleme: ' + new Date().toLocaleTimeString('tr-TR');
+    };
+</script>
+
+</body>
+</html>
