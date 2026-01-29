@@ -1,154 +1,182 @@
 /**
- * Harem Altın Native WebSocket Client (FIXED)
- * Sunucudan veri isteme özelliği eklendi
+ * Canlı Döviz Has Altın Scraper v3.1 (BUG FİX)
+ * DEMO amaçlıdır – üretimde backend kullanın
  */
 
 (function (window) {
-    'use strict';
+  'use strict';
 
-    var WS_URL = 'wss://hrmsocketonly.haremaltin.com/socket.io/?EIO=4&transport=websocket';
-    var socket = null;
-    var prices = {};
-    var pingTimer = null;
-    var reconnectDelay = 5000;
-    var isConnected = false;
+  const CONFIG = {
+    TARGET_URL: 'https://canlidoviz.com/altin-fiyatlari/kapali-carsi/has-altin',
+    PROXY_BASE: 'https://api.allorigins.win/get?url=',
+    UPDATE_INTERVAL: 60000,
+    RETRY_DELAY: 5000,
+    MAX_RETRIES: 3
+  };
 
-    function connect() {
-        console.log('[HaremAltin] Bağlanılıyor...');
-        socket = new WebSocket(WS_URL);
+  const state = {
+    prices: {
+      alis: null,
+      satis: null,
+      tarih: null,
+      durum: 'baslangic'
+    },
+    fetching: false,
+    retry: 0,
+    timer: null
+  };
 
-        socket.onopen = function () {
-            console.log('[HaremAltin] ✅ WebSocket açıldı');
-        };
+  /* ===== Utils ===== */
 
-        socket.onmessage = function (event) {
-            var msg = event.data;
-            console.log('[HaremAltin] 📨 Mesaj geldi:', msg);
+  function parsePrice(text) {
+    if (!text) return null;
+    // Türk formatı: "3.456,78" → 3456.78
+    return parseFloat(
+      text.replace(/\./g, '').replace(',', '.')
+    );
+  }
 
-            // Engine.IO handshake (0)
-            if (msg.startsWith('0')) {
-                try {
-                    var handshake = JSON.parse(msg.substring(1));
-                    startPing(handshake.pingInterval || 25000);
-                    
-                    // Socket.io connect gönder
-                    socket.send('40');
-                    console.log('[HaremAltin] 📤 Socket.io connect gönderildi (40)');
-                } catch (e) {
-                    startPing(25000);
-                    socket.send('40');
-                }
-                return;
-            }
+  function valid(price) {
+    return !isNaN(price) && price > 0 && price < 100000;
+  }
 
-            // Socket.io connected (40 yanıtı)
-            if (msg === '40') {
-                isConnected = true;
-                console.log('[HaremAltin] ✅ Socket.io bağlantısı kuruldu!');
-                
-                // 🔥 BURAYI EKLEDİK: İlk veriyi iste!
-                requestInitialData();
-                return;
-            }
+  function extract(doc) {
+    const selectors = [
+      {
+        alis: 'span[cid="1186"][dt="bA"]',
+        satis: 'span[cid="1186"][dt="amount"]'
+      },
+      // Fallback selector'lar
+      {
+        alis: '.gold-price-buy',
+        satis: '.gold-price-sell'
+      }
+    ];
 
-            // Ping (2) -> Pong (3)
-            if (msg === '2') {
-                socket.send('3');
-                return;
-            }
-
-            // Socket.io event (42)
-            if (msg.startsWith('42')) {
-                try {
-                    var payload = JSON.parse(msg.substring(2));
-                    var eventName = payload[0];
-                    var data = payload[1];
-
-                    console.log('[HaremAltin] 🎯 Event:', eventName, data);
-
-                    // Tüm eventleri yakala
-                    if (eventName === 'price_changed' || 
-                        eventName === 'prices' || 
-                        eventName === 'initial_data' ||
-                        eventName === 'data') {
-                        
-                        prices = data;
-                        console.log('[HaremAltin] 💰 Fiyatlar güncellendi:', prices);
-                        
-                        if (typeof window.HaremAltinOnUpdate === 'function') {
-                            window.HaremAltinOnUpdate(prices);
-                        }
-                    }
-                } catch (e) {
-                    console.error('[HaremAltin] ❌ Parse hatası:', e);
-                }
-            }
-        };
-
-        socket.onclose = function () {
-            console.warn('[HaremAltin] ⚠️ Bağlantı kapandı, yeniden bağlanılıyor...');
-            isConnected = false;
-            stopPing();
-            setTimeout(connect, reconnectDelay);
-        };
-
-        socket.onerror = function (err) {
-            console.error('[HaremAltin] ❌ WebSocket hatası:', err);
-            socket.close();
-        };
-    }
-
-    // 🔥 YENİ FONKSİYON: Sunucudan veri iste
-    function requestInitialData() {
-        if (!socket || socket.readyState !== WebSocket.OPEN) {
-            console.warn('[HaremAltin] ⚠️ Socket açık değil, veri istenemedi');
-            return;
+    for (const s of selectors) {
+      const a = doc.querySelector(s.alis);
+      const sEl = doc.querySelector(s.satis);
+      if (a && sEl) {
+        const alis = parsePrice(a.textContent.trim());
+        const satis = parsePrice(sEl.textContent.trim());
+        if (valid(alis) && valid(satis)) {
+          return { alis, satis };
         }
-
-        // Farklı veri isteme yöntemlerini dene
-        var requests = [
-            '42["get_prices"]',      // Olası event 1
-            '42["prices"]',          // Olası event 2
-            '42["request_prices"]',  // Olası event 3
-            '42["initial_data"]'     // Olası event 4
-        ];
-
-        requests.forEach(function(req) {
-            console.log('[HaremAltin] 📤 Veri isteniyor:', req);
-            socket.send(req);
-        });
-
-        // Eğer hiçbir event işe yaramazsa, 5 saniye sonra tekrar dene
-        setTimeout(function() {
-            if (Object.keys(prices).length === 0) {
-                console.warn('[HaremAltin] ⚠️ Hala veri gelmedi, tekrar deneniyor...');
-                requestInitialData();
-            }
-        }, 5000);
+      }
     }
+    return null;
+  }
 
-    function startPing(interval) {
-        stopPing();
-        pingTimer = setInterval(function () {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send('2');
-            }
-        }, interval);
+  /* ===== Core ===== */
+
+  async function fetchPrices() {
+    if (state.fetching) {
+      console.log('[HasAltin] ⏳ Zaten işlemde...');
+      return;
     }
+    
+    state.fetching = true;
+    state.prices.durum = 'yukleniyor';
 
-    function stopPing() {
-        if (pingTimer) {
-            clearInterval(pingTimer);
-            pingTimer = null;
-        }
+    try {
+      const url = CONFIG.PROXY_BASE + encodeURIComponent(CONFIG.TARGET_URL);
+      
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      const json = await res.json();
+      if (!json?.contents) throw new Error('Proxy boş içerik döndü');
+
+      const doc = new DOMParser().parseFromString(json.contents, 'text/html');
+      const prices = extract(doc);
+      
+      if (!prices) throw new Error('Fiyat elementleri bulunamadı');
+
+      state.prices = {
+        ...prices,
+        tarih: new Date().toISOString(),
+        durum: 'basarili'
+      };
+      state.retry = 0;
+
+      console.log('[HasAltin] ✅ Güncellendi:', {
+        alis: state.prices.alis.toFixed(2),
+        satis: state.prices.satis.toFixed(2),
+        zaman: new Date(state.prices.tarih).toLocaleString('tr-TR')
+      });
+
+      window.CanliDovizOnUpdate?.(state.prices);
+
+    } catch (err) {
+      console.error('[HasAltin] ❌', err.message);
+      state.prices.durum = 'hata';
+
+      if (state.retry < CONFIG.MAX_RETRIES) {
+        state.retry++;
+        console.log(`[HasAltin] 🔄 Tekrar deneniyor... (${state.retry}/${CONFIG.MAX_RETRIES})`);
+        
+        // ✅ DÜZELTME: Sadece tekrar fetch et, yeni interval başlatma!
+        setTimeout(() => {
+          state.fetching = false;
+          fetchPrices();
+        }, CONFIG.RETRY_DELAY);
+        return; // finally bloğuna düşmesin
+      }
+
+      console.error('[HasAltin] ⛔ Maksimum deneme aşıldı');
+      state.retry = 0;
+      window.CanliDovizOnError?.(err);
+
+    } finally {
+      // Retry durumunda finally çalışmayacak (return var)
+      state.fetching = false;
     }
+  }
 
-    window.HaremAltin = {
-        getPrices: function () { return prices; },
-        connect: connect,
-        isConnected: function() { return isConnected; }
-    };
+  function start() {
+    if (state.timer) {
+      console.warn('[HasAltin] ⚠️ Zaten çalışıyor');
+      return;
+    }
+    console.log('[HasAltin] 🚀 Başlatıldı');
+    fetchPrices();
+    state.timer = setInterval(fetchPrices, CONFIG.UPDATE_INTERVAL);
+  }
 
-    connect();
+  function stop() {
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
+      console.log('[HasAltin] ⏹️ Durduruldu');
+    }
+  }
+
+  /* ===== Public API ===== */
+
+  window.CanliDoviz = {
+    getPrices: () => ({ ...state.prices }),
+    refresh: fetchPrices,
+    start,
+    stop,
+    status: () => ({
+      calisiyor: !!state.timer,
+      yukleniyor: state.fetching,
+      son: state.prices.tarih,
+      durum: state.prices.durum,
+      retryCount: state.retry
+    }),
+    // ✅ YENİ: Debug için
+    debug: () => ({ ...state })
+  };
+
+  // Otomatik başlat
+  document.readyState === 'loading'
+    ? document.addEventListener('DOMContentLoaded', start)
+    : start();
+
+  console.log('[HasAltin] 📦 v3.1 yüklendi');
 
 })(window);
