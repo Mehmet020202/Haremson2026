@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Harem Altın – Canlı Fiyatlar</title>
+  <title>Has Altın – Canlı Döviz</title>
+
   <style>
     body { 
       font-family: Arial, sans-serif; 
@@ -26,7 +27,7 @@
     }
     .status {
       text-align: center;
-      color: #888;
+      color: #aaa;
       margin-top: 10px;
       font-size: 12px;
     }
@@ -34,17 +35,32 @@
 </head>
 <body>
 
-<h2>🏆 Harem Altın Canlı Fiyatlar</h2>
-<pre id="output">Bağlanıyor...</pre>
-<div class="status" id="status">WebSocket bağlantısı kuruluyor...</div>
+<h2>🏆 Has Altın – Canlı Döviz</h2>
 
-<script src="haremaltin.js"></script>
+<pre id="output">Bağlanıyor...</pre>
+<div class="status" id="status">Veri alınıyor…</div>
+
+<!-- ✅ GÜNCEL SCRAPER -->
+<script src="has-altin.js"></script>
+
+<!-- ✅ CALLBACK -->
 <script>
-  window.HaremAltinOnUpdate = function (prices) {
+  window.CanliDovizOnUpdate = function (p) {
     document.getElementById('output').textContent =
-      JSON.stringify(prices, null, 2);
-    document.getElementById('status').textContent = 
-      'Son güncelleme: ' + new Date().toLocaleTimeString('tr-TR');
+`HAS ALTIN (CanlıDöviz)
+-----------------------
+Alış : ${p.alis.toLocaleString('tr-TR')} TL
+Satış: ${p.satis.toLocaleString('tr-TR')} TL
+`;
+
+    document.getElementById('status').textContent =
+      'Son güncelleme: ' +
+      new Date(p.tarih).toLocaleTimeString('tr-TR');
+  };
+
+  window.CanliDovizOnError = function (err) {
+    document.getElementById('status').textContent =
+      'Hata: ' + err.message;
   };
 </script>
 
